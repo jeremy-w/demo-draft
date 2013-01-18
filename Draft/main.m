@@ -10,7 +10,7 @@
 #import <search.h>
 
 #define draft_log(fmt, ...) \
-    do { fprintf(stderr, fmt "\n", ## __VA_ARGS__); } while (0)
+    do { /*fprintf(stderr, fmt "\n", ## __VA_ARGS__);*/ } while (0)
 
 /* The underlying object type is a dispatch queue. */
 typedef dispatch_queue_t draft_t;
@@ -135,24 +135,22 @@ draft_lookup_action(draft_t obj, const char *msg)
 
     const void *name = draft_intern(msg);
 
-    /* Chase prototype chain to find action. */
-    draft_t parent = obj;
-    draft_slot_t action = NULL;
-    do {
-        draft_log("%s: maybe %p has \"%s\"?", __func__, parent, msg);
+    /* Let GCD get-specific search the prototype chain for us. */
+    /* Need to actually execute on the queue to get the prototype
+     * search to work. Otherwise it falls back on searching only the
+     * current queue. */
+    __block draft_slot_t action = NULL;
+    dispatch_sync(obj, ^{
         action = (__bridge draft_slot_t)
-            dispatch_queue_get_specific(parent, name);
-        if (action) break;
+            dispatch_get_specific(name);
+    });
 
-        parent = draft_send(parent, "parent", nil);
-    } while (parent && !action);
-
-    draft_log("%s: %p \"%s\" - found on %p", __func__, obj, msg, parent);
     if (!action) {
         fprintf(stderr, "%s: *** obj %p does not respond to message %s\n",
                 __func__, obj, msg);
         return nil;
     }
+    draft_log("%s: %p \"%s\": found action %p", __func__, obj, msg, action);
     return action;
 }
 
@@ -192,7 +190,7 @@ draft_object(void)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         object = dispatch_queue_create("<DraftObject>", 0);
-        dispatch_set_target_queue(object, dispatch_get_main_queue());
+        dispatch_set_target_queue(object, dispatch_get_global_queue(0, 0));
         draft_set(object, "parent", ^draft_t(draft_t me, draft_t you) {
             return NULL;
         });
